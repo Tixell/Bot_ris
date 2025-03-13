@@ -685,9 +685,9 @@ async def handle_message(update: Update, context: CallbackContext):
         user2_name = user2_info["first_name"]
         bottle_phrases = [
             "🍾 Бутылка решила, что",
-            "🎉 Судьба через бутылку: выберите",
-            "💫 Бутылка указывает на",
-            "🥂 Бутылка выбрала"
+            "🎉 Судьба считает что",
+            "💫 Бутылка думает что",
+            "🥂 Бутылка знает что"
         ]
         chosen_bottle_phrase = random.choice(bottle_phrases)
         if additional_text:
