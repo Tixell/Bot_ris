@@ -698,7 +698,7 @@ def error_handler(update: Update, context: CallbackContext):
 
 # Основная функция
 def main():
-    TOKEN = os.environ.get("7361320472:AAGPrR_6a6h6taOCKG3xdPh83-zRe7NQYhQ")
+    TOKEN = os.environ.get("BOTTOKEN")
     if not TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN не задан в переменных окружения.")
         return
