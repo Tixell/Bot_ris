@@ -91,15 +91,19 @@ def check_bans():
         del banned_users[user_id]
         logger.info(f"Пользователь с ID {user_id} был разбанен.")
 
+from datetime import datetime, timedelta
+
 # === Функция для поиска пользователя по ссылке/референсу ===
 def find_user_by_reference(chat_id, ref: str):
-    ref = ref.lower()
+    ref = ref.lower().strip()
+    # Убираем лишние символы "t.me/" и "@"
     if ref.startswith("t.me/"):
         ref = ref[5:]
     if ref.startswith("@"):
         ref = ref[1:]
+    # Поиск по username или first_name
     for uid, info in participants.get(chat_id, {}).items():
-        if info["username"] == ref or info["first_name"].lower() == ref:
+        if info.get("username", "").lower() == ref or info.get("first_name", "").lower() == ref:
             return uid, info
     return None, None
 
@@ -121,11 +125,10 @@ async def rating_chai(update: Update, context: CallbackContext):
     for uid, total in sorted_users[:10]:
         uid_int = int(uid)
         user_info = participants.get(update.effective_chat.id, {}).get(uid_int, {"first_name": "Неизвестный"})
-        # Скрытая ссылка: имя пользователя выделяется синей ссылкой без явного URL
         message += f"[{user_info['first_name']}](tg://user?id={uid_int}): {total} литров ☕\n"
     await update.message.reply_text(message, parse_mode="Markdown")
 
-# === Функции модуля «Браки» (уже имеющиеся) ===
+# === Функции модуля «Браки» ===
 
 async def propose_marriage(update: Update, context: CallbackContext, ref: str):
     chat_id = update.effective_chat.id
@@ -178,10 +181,11 @@ async def accept_marriage(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Один из участников уже состоит в браке.")
         del marriage_proposals[target.id]
         return
-    marriages[key] = {"partners": (proposer_id, target.id), "start_time": now, "active": True, "divorced_time": None, "extended_until": now}
+    marriages[key] = {"partners": (proposer_id, target.id), "start_time": now, "active": True, 
+                       "divorced_time": None, "extended_until": now}
     user_marriage[proposer_id] = key
     user_marriage[target.id] = key
-    await update.message.reply_text("💍 Поздравляем, вы теперь в браке!")
+    await update.message.reply_text("💍 Поздравляем, вы теперь состоите в браке!")
     del marriage_proposals[target.id]
 
 async def decline_marriage(update: Update, context: CallbackContext):
@@ -281,7 +285,8 @@ async def marry_pair(update: Update, context: CallbackContext, ref1: str, ref2: 
         return
     key = frozenset({uid1, uid2})
     now = datetime.now()
-    marriages[key] = {"partners": (uid1, uid2), "start_time": now, "active": True, "divorced_time": None, "extended_until": now}
+    marriages[key] = {"partners": (uid1, uid2), "start_time": now, "active": True,
+                        "divorced_time": None, "extended_until": now}
     user_marriage[uid1] = key
     user_marriage[uid2] = key
     await update.message.reply_text(f"💍 {info1['first_name']} и {info2['first_name']} теперь состоят в браке!")
@@ -406,8 +411,6 @@ async def handle_marriage(update: Update, context: CallbackContext):
             ref = message_text[5:].strip()
             if ref:
                 await propose_marriage(update, context, ref)
-            else:
-                await update.message.reply_text("❌ Укажите ссылку или имя для предложения брака.")
             return
 
     # Команда: "!развод" – расторжение брака
@@ -425,11 +428,9 @@ async def handle_marriage(update: Update, context: CallbackContext):
         ref = message_text[len("твой брак"):].strip()
         if ref:
             await user_marriage_info(update, context, ref)
-        else:
-            await update.message.reply_text("❌ Укажите ссылку или имя пользователя для поиска брака.")
         return
 
-    # Команда: "браки" – вывод списка активных браков (с возможным номером страницы)
+    # Команда: "браки" – список активных браков (с пагинацией)
     if lower_text.startswith("браки"):
         parts = message_text.split()
         page = 1
@@ -445,7 +446,6 @@ async def handle_marriage(update: Update, context: CallbackContext):
     if lower_text.startswith("поженить пару"):
         parts = message_text.split()
         if len(parts) < 4:
-            await update.message.reply_text("❌ Использование: Поженить пару {ссылка} {ссылка}")
             return
         ref1 = parts[2]
         ref2 = parts[3]
@@ -456,7 +456,6 @@ async def handle_marriage(update: Update, context: CallbackContext):
     if lower_text.startswith("развести пару"):
         parts = message_text.split()
         if len(parts) < 4:
-            await update.message.reply_text("❌ Использование: Развести пару {ссылка} {ссылка}")
             return
         ref1 = parts[2]
         ref2 = parts[3]
@@ -488,7 +487,7 @@ async def handle_marriage(update: Update, context: CallbackContext):
         await auto_divorce_marriages(update, context)
         return
 
-    
+
 
 # === Модуль «Дуэли» ===
 
