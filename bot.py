@@ -714,7 +714,6 @@ async def handle_duel(update: Update, context: CallbackContext):
         return
 
 # === Основной обработчик текстовых сообщений ===
-
 async def handle_message(update: Update, context: CallbackContext):
     if not update.message or not update.message.text:
         return  # Обрабатываем только текстовые сообщения
@@ -741,17 +740,17 @@ async def handle_message(update: Update, context: CallbackContext):
         await rating_chai(update, context)
         return
 
-    # Обработка команд модуля «Браки» и дуэлей
+    # Если сообщение начинается с ключевых слов для модуля «Браки»
+    marriage_keywords = [
+        "брак", "!развод", "мой брак", "твой брак", "браки", "поженить пару",
+        "развести пару", "сброс браков", "продление брака", "топ браков",
+        "авторазвод браков", "брак цена продления", "брак продлить"
+    ]
     lower_text = message_text.lower()
-    if lower_text.startswith("брак") or lower_text.startswith("!развод") or \
-       lower_text.startswith("мой брак") or lower_text.startswith("твой брак") or \
-       lower_text.startswith("браки") or lower_text.startswith("поженить пару") or \
-       lower_text.startswith("развести пару") or lower_text.startswith("сброс браков") or \
-       lower_text.startswith("продление брака") or lower_text.startswith("топ браков") or \
-       lower_text.startswith("авторазвод браков") or lower_text.startswith("брак цена продления") or \
-       lower_text.startswith("брак продлить"):
-        await handle_marriage(update, context)
-        return
+    for keyword in marriage_keywords:
+        if lower_text.startswith(keyword):
+            await handle_marriage(update, context)
+            return
 
     # Обработка команд модуля «Дуэли»
     if lower_text.startswith("дуэль") or lower_text.startswith("кто дуэль") or \
@@ -779,11 +778,11 @@ async def handle_message(update: Update, context: CallbackContext):
         await update.message.reply_text(reply_text, parse_mode="Markdown")
         return
 
-    if "рис инфа что" in message_text.lower() or "инфа что" in message_text.lower():
+    if "рис инфа что" in lower_text or "инфа что" in lower_text:
         infa_phrases = ["🔍Я обнаружил", "🤔По моим данным", "🧐Я подсчитал", "🧮Кажется, я определил"]
         chosen_phrase = random.choice(infa_phrases)
         try:
-            if "рис инфа что" in message_text.lower():
+            if "рис инфа что" in lower_text:
                 subject = message_text.split("Рис инфа что", 1)[1].strip()
             else:
                 subject = message_text.split("Инфа что", 1)[1].strip()
@@ -834,6 +833,10 @@ async def handle_message(update: Update, context: CallbackContext):
         reply_text = f"{phrase}\n[{user1_name}](tg://user?id={user1_id}) | [{user2_name}](tg://user?id={user2_id})"
         await update.message.reply_text(reply_text, parse_mode="Markdown")
         return
+
+    # Если команда не распознана, можно отправить сообщение по умолчанию
+    await update.message.reply_text("❓ Неизвестная команда.")
+
 
 # Команда для бана пользователя
 async def ban_user(update: Update, context: CallbackContext):
