@@ -125,7 +125,7 @@ async def rating_chai(update: Update, context: CallbackContext):
         message += f"[{user_info['first_name']}](tg://user?id={uid_int}): {total} литров ☕\n"
     await update.message.reply_text(message, parse_mode="Markdown")
 
-# === Функции модуля «Браки» ===
+# === Функции модуля «Браки» (уже имеющиеся) ===
 
 async def propose_marriage(update: Update, context: CallbackContext, ref: str):
     chat_id = update.effective_chat.id
@@ -315,7 +315,6 @@ async def reset_marriages(update: Update, context: CallbackContext):
     marriage_proposals.clear()
     await update.message.reply_text("💥 Все браки сброшены.")
 
-# Новые команды для продления брака
 async def set_marriage_extension_price(update: Update, context: CallbackContext):
     global marriage_extension_price
     try:
@@ -343,7 +342,6 @@ async def extend_marriage_custom(update: Update, context: CallbackContext):
     if not marriage or not marriage["active"]:
         await update.message.reply_text("❌ У вас нет активного брака.")
         return
-    # Продлеваем брак на указанное количество дней
     extension = timedelta(days=days)
     if marriage.get("extended_until") and marriage["extended_until"] > datetime.now():
         marriage["extended_until"] += extension
@@ -352,6 +350,145 @@ async def extend_marriage_custom(update: Update, context: CallbackContext):
     await update.message.reply_text(
         f"⏳ Брак продлён до {marriage['extended_until'].strftime('%d.%m.%Y %H:%M:%S')}. Цена продления: {marriage_extension_price}."
     )
+
+# === Дополнительные функции для модуля «Браки» ===
+
+async def top_marriages(update: Update, context: CallbackContext):
+    """Выводит рейтинг самых долгих браков в чате."""
+    chat_id = update.effective_chat.id
+    active = [(key, m) for key, m in marriages.items() if m["active"]]
+    if not active:
+        await update.message.reply_text("ℹ️ В чате нет активных браков.")
+        return
+    active.sort(key=lambda x: (datetime.now() - x[1]["start_time"]).days, reverse=True)
+    msg = "💍 Топ браков (по продолжительности):\n"
+    for key, m in active:
+        u1, u2 = m["partners"]
+        name1 = participants[chat_id].get(u1, {"first_name": "Неизвестно"})["first_name"]
+        name2 = participants[chat_id].get(u2, {"first_name": "Неизвестно"})["first_name"]
+        duration = (datetime.now() - m["start_time"]).days
+        msg += f"{name1} & {name2} – {duration} дней\n"
+    await update.message.reply_text(msg)
+
+async def auto_divorce_marriages(update: Update, context: CallbackContext):
+    """Автоматически расторгает браки, у которых истёк срок продления."""
+    chat_id = update.effective_chat.id
+    now = datetime.now()
+    count = 0
+    for key, marriage in list(marriages.items()):
+        if marriage["active"] and "extended_until" in marriage and marriage["extended_until"] < now:
+            marriage["active"] = False
+            marriage["divorced_time"] = now
+            for uid in key:
+                if uid in user_marriage:
+                    del user_marriage[uid]
+            count += 1
+    if count:
+        await update.message.reply_text(f"💥 Авторазвод выполнен для {count} браков.")
+    else:
+        await update.message.reply_text("ℹ️ Нет браков, подлежащих авторазводу.")
+
+# === Диспетчер команд модуля «Браки» ===
+
+async def handle_marriage(update: Update, context: CallbackContext):
+    message_text = update.message.text.strip()
+    lower_text = message_text.lower()
+
+    # Команда: "Брак {ссылка}" (для предложения или восстановления брака)
+    if lower_text.startswith("брак "):
+        if lower_text == "брак да":
+            await accept_marriage(update, context)
+            return
+        elif lower_text == "брак нет":
+            await decline_marriage(update, context)
+            return
+        else:
+            ref = message_text[5:].strip()
+            if ref:
+                await propose_marriage(update, context, ref)
+            else:
+                await update.message.reply_text("❌ Укажите ссылку или имя для предложения брака.")
+            return
+
+    # Команда: "!развод" – расторжение брака
+    if lower_text.startswith("!развод"):
+        await dissolve_marriage(update, context)
+        return
+
+    # Команда: "мой брак"
+    if lower_text == "мой брак":
+        await my_marriage(update, context)
+        return
+
+    # Команда: "твой брак {ссылка}"
+    if lower_text.startswith("твой брак"):
+        ref = message_text[len("твой брак"):].strip()
+        if ref:
+            await user_marriage_info(update, context, ref)
+        else:
+            await update.message.reply_text("❌ Укажите ссылку или имя пользователя для поиска брака.")
+        return
+
+    # Команда: "браки" – вывод списка активных браков (с возможным номером страницы)
+    if lower_text.startswith("браки"):
+        parts = message_text.split()
+        page = 1
+        if len(parts) >= 2:
+            try:
+                page = int(parts[1])
+            except ValueError:
+                page = 1
+        await list_marriages(update, context, page=page)
+        return
+
+    # Команда: "поженить пару {ссылка} {ссылка}" – административная команда
+    if lower_text.startswith("поженить пару"):
+        parts = message_text.split()
+        if len(parts) < 4:
+            await update.message.reply_text("❌ Использование: Поженить пару {ссылка} {ссылка}")
+            return
+        ref1 = parts[2]
+        ref2 = parts[3]
+        await marry_pair(update, context, ref1, ref2)
+        return
+
+    # Команда: "развести пару {ссылка} {ссылка}" – административная команда
+    if lower_text.startswith("развести пару"):
+        parts = message_text.split()
+        if len(parts) < 4:
+            await update.message.reply_text("❌ Использование: Развести пару {ссылка} {ссылка}")
+            return
+        ref1 = parts[2]
+        ref2 = parts[3]
+        await divorce_pair(update, context, ref1, ref2)
+        return
+
+    # Команда: "брак цена продления {число}"
+    if lower_text.startswith("брак цена продления"):
+        await set_marriage_extension_price(update, context)
+        return
+
+    # Команда: "брак продлить {кол-во дней}"
+    if lower_text.startswith("брак продлить"):
+        await extend_marriage_custom(update, context)
+        return
+
+    # Команда: "сброс браков" (только для администраторов)
+    if lower_text.startswith("сброс браков"):
+        await reset_marriages(update, context)
+        return
+
+    # Команда: "топ браков" – рейтинг самых долгих браков
+    if lower_text.startswith("топ браков"):
+        await top_marriages(update, context)
+        return
+
+    # Команда: "авторазвод браков" – автоматический развод просроченных браков
+    if lower_text.startswith("авторазвод браков"):
+        await auto_divorce_marriages(update, context)
+        return
+
+    await update.message.reply_text("❓ Неизвестная команда модуля браков.")
 
 # === Модуль «Дуэли» ===
 
