@@ -128,6 +128,42 @@ async def rating_chai(update: Update, context: CallbackContext):
         message += f"[{user_info['first_name']}](tg://user?id={uid_int}): {total} литров ☕\n"
     await update.message.reply_text(message, parse_mode="Markdown")
 
+# === Функция для поиска пользователя по ссылке/референсу ===
+def find_user_by_reference(chat_id, ref: str):
+    ref = ref.lower().strip()
+    # Убираем лишние символы "t.me/" и "@"
+    if ref.startswith("t.me/"):
+        ref = ref[5:]
+    if ref.startswith("@"):
+        ref = ref[1:]
+    # Поиск по username или first_name в зарегистрированных участниках
+    for uid, info in participants.get(chat_id, {}).items():
+        if info.get("username", "").lower() == ref or info.get("first_name", "").lower() == ref:
+            return uid, info
+    return None, None
+
+# === Функция для вывода рейтинга чая ===
+async def rating_chai(update: Update, context: CallbackContext):
+    global last_reset_time
+    # Если прошло 1 неделя, сбрасываем рейтинг
+    if last_reset_time is None or datetime.now() - last_reset_time >= timedelta(weeks=1):
+        chai_consumption.clear()
+        last_reset_time = datetime.now()
+        save_last_reset()
+        save_rating()
+        logger.info("Рейтинг чая был сброшен.")
+    sorted_users = sorted(chai_consumption.items(), key=lambda x: x[1], reverse=True)
+    if not sorted_users:
+        await update.message.reply_text("📊 На данный момент нет данных для рейтинга чая. ☕")
+        return
+    message = "🍵 Рейтинг по чаю за неделю: \n"
+    for uid, total in sorted_users[:10]:
+        uid_int = int(uid)
+        user_info = participants.get(update.effective_chat.id, {}).get(uid_int, {"first_name": "Неизвестный"})
+        # Скрытая ссылка: имя пользователя выделяется синей ссылкой без явного URL
+        message += f"[{user_info['first_name']}](tg://user?id={uid_int}): {total} литров ☕\n"
+    await update.message.reply_text(message, parse_mode="Markdown")
+
 # === Функции модуля «Браки» ===
 
 async def propose_marriage(update: Update, context: CallbackContext, ref: str):
@@ -136,7 +172,8 @@ async def propose_marriage(update: Update, context: CallbackContext, ref: str):
     proposer_info = participants[chat_id].get(proposer.id)
     target_uid, target_info = find_user_by_reference(chat_id, ref)
     if not target_uid:
-        await update.message.reply_text("❌ Не удалось найти пользователя по указанной ссылке/имени.")
+        await update.message.reply_text("❌ Не удалось найти пользователя по указанной ссылке/имени.\n"
+                                          "Убедитесь, что нужный участник уже отправлял сообщение в чат.")
         return
     if target_uid == proposer.id:
         await update.message.reply_text("❌ Нельзя предложить брак самому себе!")
@@ -834,7 +871,6 @@ async def handle_message(update: Update, context: CallbackContext):
         return
 
     # Если команда не распознана, можно отправить сообщение по умолчанию
-    await update.message.reply_text("❓ Неизвестная команда.")
 
 
 # Команда для бана пользователя
