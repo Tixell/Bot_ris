@@ -2,13 +2,18 @@ import logging
 import random
 import time
 import os
+import json
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters, CallbackContext
 
+# Файлы для хранения рейтинга чая и времени сброса
+RATING_FILE = "tea_rating.json"
+LAST_RESET_FILE = "last_reset.json"
+
 # Глобальные словари и переменные
 participants = {}  # {chat_id: {user_id: {"first_name": ..., "username": ...}}}
-chai_consumption = {}
+chai_consumption = {}  # рейтинг чая, ключ – строковое представление user.id
 banned_users = {}
 
 # Модуль браков
@@ -36,7 +41,46 @@ duel_outcome = None
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Функция проверки банов
+# === Функции сохранения/загрузки рейтинга чая ===
+def load_rating():
+    global chai_consumption
+    if os.path.exists(RATING_FILE):
+        with open(RATING_FILE, "r", encoding="utf-8") as f:
+            try:
+                chai_consumption = json.load(f)
+            except json.JSONDecodeError:
+                chai_consumption = {}
+    else:
+        chai_consumption = {}
+
+def save_rating():
+    with open(RATING_FILE, "w", encoding="utf-8") as f:
+        json.dump(chai_consumption, f)
+
+def load_last_reset():
+    global last_reset_time
+    if os.path.exists(LAST_RESET_FILE):
+        with open(LAST_RESET_FILE, "r", encoding="utf-8") as f:
+            try:
+                timestamp = json.load(f)
+                last_reset_time = datetime.fromisoformat(timestamp) if timestamp else None
+            except Exception:
+                last_reset_time = None
+    else:
+        last_reset_time = None
+
+def save_last_reset():
+    with open(LAST_RESET_FILE, "w", encoding="utf-8") as f:
+        if last_reset_time:
+            json.dump(last_reset_time.isoformat(), f)
+        else:
+            json.dump("", f)
+
+# Загрузка данных при старте
+load_rating()
+load_last_reset()
+
+# === Функция проверки банов ===
 def check_bans():
     current_time = time.time()
     to_unban = []
@@ -47,7 +91,7 @@ def check_bans():
         del banned_users[user_id]
         logger.info(f"Пользователь с ID {user_id} был разбанен.")
 
-# Функция для поиска пользователя по ссылке/референсу
+# === Функция для поиска пользователя по ссылке/референсу ===
 def find_user_by_reference(chat_id, ref: str):
     ref = ref.lower()
     if ref.startswith("t.me/"):
@@ -58,6 +102,28 @@ def find_user_by_reference(chat_id, ref: str):
         if info["username"] == ref or info["first_name"].lower() == ref:
             return uid, info
     return None, None
+
+# === Функция для вывода рейтинга чая ===
+async def rating_chai(update: Update, context: CallbackContext):
+    global last_reset_time
+    # Если прошло 1 неделя, сбрасываем рейтинг
+    if last_reset_time is None or datetime.now() - last_reset_time >= timedelta(weeks=1):
+        chai_consumption.clear()
+        last_reset_time = datetime.now()
+        save_last_reset()
+        save_rating()
+        logger.info("Рейтинг чая был сброшен.")
+    sorted_users = sorted(chai_consumption.items(), key=lambda x: x[1], reverse=True)
+    if not sorted_users:
+        await update.message.reply_text("📊 На данный момент нет данных для рейтинга чая. ☕")
+        return
+    message = "🍵 Рейтинг по чаю за неделю: \n"
+    for uid, total in sorted_users[:10]:
+        uid_int = int(uid)
+        user_info = participants.get(update.effective_chat.id, {}).get(uid_int, {"first_name": "Неизвестный"})
+        # Скрытая ссылка: имя пользователя выделяется синей ссылкой без явного URL
+        message += f"[{user_info['first_name']}](tg://user?id={uid_int}): {total} литров ☕\n"
+    await update.message.reply_text(message, parse_mode="Markdown")
 
 # === Функции модуля «Браки» ===
 
@@ -287,8 +353,6 @@ async def extend_marriage_custom(update: Update, context: CallbackContext):
         f"⏳ Брак продлён до {marriage['extended_until'].strftime('%d.%m.%Y %H:%M:%S')}. Цена продления: {marriage_extension_price}."
     )
 
-# === Конец модуля «Браки» ===
-
 # === Модуль «Дуэли» ===
 
 def init_duel_stats(user_id):
@@ -296,7 +360,7 @@ def init_duel_stats(user_id):
         duel_stats[user_id] = {"wins": 0, "draws": 0, "losses": 0}
 
 async def handle_duel(update: Update, context: CallbackContext):
-    global duel_outcome  # Объявляем глобальную переменную сразу в начале функции
+    global duel_outcome
     message_text = update.message.text.strip()
     chat_id = update.effective_chat.id
     user = update.effective_user
@@ -512,7 +576,8 @@ async def handle_duel(update: Update, context: CallbackContext):
         await update.message.reply_text("🔄 Статистика дуэлей сброшена.")
         return
 
-# Основной обработчик текстовых сообщений
+# === Основной обработчик текстовых сообщений ===
+
 async def handle_message(update: Update, context: CallbackContext):
     if not update.message or not update.message.text:
         return  # Обрабатываем только текстовые сообщения
@@ -572,9 +637,8 @@ async def handle_message(update: Update, context: CallbackContext):
         chat_participants = list(participants[chat.id].items())
         chosen_user_id, info = random.choice(chat_participants)
         chosen_name = info["first_name"]
-        profile_username = info["username"]
-        user_profile_url = f"https://t.me/{profile_username}"
-        reply_text = f"{chosen_phrase}, что {chosen_name} {additional_text} 😄\n[Профиль пользователя]({user_profile_url})"
+        # Используем скрытую ссылку с tg://user?id=
+        reply_text = f"{chosen_phrase}, что [{chosen_name}](tg://user?id={chosen_user_id}) {additional_text} 😄"
         await update.message.reply_text(reply_text, parse_mode="Markdown")
         return
 
@@ -600,7 +664,9 @@ async def handle_message(update: Update, context: CallbackContext):
             tea_name = message_text[len("Пить чай"):].strip()
         if tea_name:
             random_liters = round(random.uniform(1, 40), 2)
-            chai_consumption[user.id] = chai_consumption.get(user.id, 0) + random_liters
+            uid = str(user.id)
+            chai_consumption[uid] = chai_consumption.get(uid, 0) + random_liters
+            save_rating()
             reply_text = f"🍵 {user.first_name}, выпил {random_liters} литров чая {tea_name} 😋"
             await update.message.reply_text(reply_text)
         return
@@ -613,12 +679,10 @@ async def handle_message(update: Update, context: CallbackContext):
         if len(participants[chat.id]) < 2:
             await update.message.reply_text("❌ Нельзя крутануть бутылко, нужно хотя бы два человека. ❌")
             return
-        participants_list = [info["first_name"] for info in participants[chat.id].values()]
-        user1, user2 = random.sample(participants_list, 2)
-        user1_info = next(info for uid, info in participants[chat.id].items() if info["first_name"] == user1)
-        user2_info = next(info for uid, info in participants[chat.id].items() if info["first_name"] == user2)
-        user1_profile_url = f"https://t.me/{user1_info['username']}"
-        user2_profile_url = f"https://t.me/{user2_info['username']}"
+        sampled = random.sample(list(participants[chat.id].items()), 2)
+        (user1_id, user1_info), (user2_id, user2_info) = sampled[0], sampled[1]
+        user1_name = user1_info["first_name"]
+        user2_name = user2_info["first_name"]
         bottle_phrases = [
             "🍾 Бутылка решила, что",
             "🎉 Судьба через бутылку: выберите",
@@ -627,29 +691,12 @@ async def handle_message(update: Update, context: CallbackContext):
         ]
         chosen_bottle_phrase = random.choice(bottle_phrases)
         if additional_text:
-            phrase = f"{chosen_bottle_phrase} {user1} {additional_text} {user2} 🔄"
+            phrase = f"{chosen_bottle_phrase} {user1_name} {additional_text} {user2_name} 🔄"
         else:
-            phrase = f"{chosen_bottle_phrase} {user1} и {user2} 🔄"
-        reply_text = f"{phrase}\n[Профиль {user1}]({user1_profile_url}) | [Профиль {user2}]({user2_profile_url})"
+            phrase = f"{chosen_bottle_phrase} {user1_name} и {user2_name} 🔄"
+        reply_text = f"{phrase}\n[{user1_name}](tg://user?id={user1_id}) | [{user2_name}](tg://user?id={user2_id})"
         await update.message.reply_text(reply_text, parse_mode="Markdown")
         return
-
-# Команда для рейтинга чая
-async def rating_chai(update: Update, context: CallbackContext):
-    global last_reset_time
-    if last_reset_time is None or datetime.now() - last_reset_time >= timedelta(weeks=1):
-        chai_consumption.clear()
-        last_reset_time = datetime.now()
-        logger.info("Рейтинг чая был сброшен.")
-    sorted_users = sorted(chai_consumption.items(), key=lambda x: x[1], reverse=True)
-    if not sorted_users:
-        await update.message.reply_text("📊 На данный момент нет данных для рейтинга чая. ☕")
-        return
-    message = "🍵 Рейтинг по чаю за неделю: \n"
-    for user_id, total_chai in sorted_users[:10]:
-        info = participants[update.effective_chat.id].get(user_id, {"first_name": "Неизвестный"})
-        message += f"{info['first_name']}: {total_chai} литров ☕\n"
-    await update.message.reply_text(message)
 
 # Команда для бана пользователя
 async def ban_user(update: Update, context: CallbackContext):
