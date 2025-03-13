@@ -32,7 +32,7 @@ duels = {}
 # duel_stats: статистика дуэлей {user_id: {"wins": int, "draws": int, "losses": int}}
 duel_stats = {}
 # Глобальная настройка исхода дуэли (по умолчанию "0" – ничего не делать)
-duel_outcome = "0"
+duel_outcome = None
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
