@@ -298,6 +298,7 @@ def init_duel_stats(user_id):
         duel_stats[user_id] = {"wins": 0, "draws": 0, "losses": 0}
 
 async def handle_duel(update: Update, context: CallbackContext):
+    global duel_outcome  # Объявляем глобальную переменную сразу в начале функции
     message_text = update.message.text.strip()
     chat_id = update.effective_chat.id
     user = update.effective_user
@@ -340,7 +341,6 @@ async def handle_duel(update: Update, context: CallbackContext):
         if chat_id in duels:
             await update.message.reply_text("❌ В чате уже идёт дуэль.")
             return
-        # Выбираем случайного участника (исключая бота и вызывающего)
         chat_participants = [uid for uid in participants.get(chat_id, {}) if uid != context.bot.id and uid != user.id]
         if not chat_participants:
             await update.message.reply_text("❌ Недостаточно участников для дуэли.")
@@ -371,7 +371,6 @@ async def handle_duel(update: Update, context: CallbackContext):
             await update.message.reply_text("❌ У вас нет вызова на дуэль.")
             return
         duel["status"] = "active"
-        # Случайным образом определяем, кто начинает
         duel["turn"] = random.choice([duel["challenger"], duel["target"]])
         for uid in duel["aim_bonus"]:
             duel["aim_bonus"][uid] = 0
@@ -414,7 +413,6 @@ async def handle_duel(update: Update, context: CallbackContext):
     if chat_id in duels:
         duel = duels[chat_id]
         if duel["status"] == "active":
-            # Проверяем, что сообщение отправлено участником дуэли
             if user.id not in [duel["challenger"], duel["target"]]:
                 return
 
@@ -424,7 +422,9 @@ async def handle_duel(update: Update, context: CallbackContext):
                     await update.message.reply_text("❌ Сейчас не ваш ход.")
                     return
                 duel["aim_bonus"][user.id] += 10
-                await update.message.reply_text(f"🎯 {participants[chat_id][user.id]['first_name']} прицелился. Бонус: {duel['aim_bonus'][user.id]}%")
+                await update.message.reply_text(
+                    f"🎯 {participants[chat_id][user.id]['first_name']} прицелился. Бонус: {duel['aim_bonus'][user.id]}%"
+                )
                 return
 
             # Сбросить прицел
@@ -433,7 +433,9 @@ async def handle_duel(update: Update, context: CallbackContext):
                     await update.message.reply_text("❌ Сейчас не ваш ход.")
                     return
                 duel["aim_bonus"][user.id] = 0
-                await update.message.reply_text(f"🎯 {participants[chat_id][user.id]['first_name']} сбросил прицел.")
+                await update.message.reply_text(
+                    f"🎯 {participants[chat_id][user.id]['first_name']} сбросил прицел."
+                )
                 return
 
             # Выстрел
@@ -447,7 +449,6 @@ async def handle_duel(update: Update, context: CallbackContext):
                 roll = random.randint(1, 100)
                 shooter_name = participants[chat_id][user.id]["first_name"]
                 if roll <= hit_chance:
-                    # Попадание — дуэль заканчивается, проигравший определяется
                     loser = duel["target"] if user.id == duel["challenger"] else duel["challenger"]
                     winner = user.id
                     init_duel_stats(winner)
@@ -455,7 +456,6 @@ async def handle_duel(update: Update, context: CallbackContext):
                     duel_stats[winner]["wins"] += 1
                     duel_stats[loser]["losses"] += 1
                     result_msg = f"💥 {shooter_name} выстрелил и попал! Дуэль окончена."
-                    # Применяем исход дуэли к проигравшему
                     outcome_text = ""
                     if duel_outcome == "кик":
                         outcome_text = "Будет произведён кик."
@@ -480,9 +480,7 @@ async def handle_duel(update: Update, context: CallbackContext):
                     del duels[chat_id]
                 else:
                     await update.message.reply_text(f"😅 {shooter_name} выстрелил, но промахнулся!")
-                    # Сброс бонуса у стрелявшего
                     duel["aim_bonus"][user.id] = 0
-                    # Передаём ход сопернику
                     duel["turn"] = duel["target"] if user.id == duel["challenger"] else duel["challenger"]
                     next_shooter = participants[chat_id][duel["turn"]]["first_name"]
                     await update.message.reply_text(f"Сейчас ход у {next_shooter}.")
@@ -494,7 +492,6 @@ async def handle_duel(update: Update, context: CallbackContext):
         if len(parts) < 3:
             await update.message.reply_text("❌ Использование: Дуэли исход {параметр}")
             return
-        global duel_outcome
         duel_outcome = parts[2].strip().lower()
         await update.message.reply_text(f"⚙️ Исход дуэли установлен: {duel_outcome}")
         return
@@ -516,8 +513,6 @@ async def handle_duel(update: Update, context: CallbackContext):
         duel_stats.clear()
         await update.message.reply_text("🔄 Статистика дуэлей сброшена.")
         return
-
-# === Конец модуля «Дуэли» ===
 
 # Основной обработчик текстовых сообщений
 async def handle_message(update: Update, context: CallbackContext):
