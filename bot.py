@@ -488,7 +488,7 @@ async def handle_marriage(update: Update, context: CallbackContext):
         await auto_divorce_marriages(update, context)
         return
 
-    await update.message.reply_text("❓ Неизвестная команда модуля браков.")
+    
 
 # === Модуль «Дуэли» ===
 
